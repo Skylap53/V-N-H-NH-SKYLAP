@@ -277,6 +277,13 @@ tr.click{cursor:pointer} tr.click:hover td{background:var(--sunk)}
 .ro{background:var(--warn-soft);color:var(--warn);padding:8px 12px;border-radius:5px;font-size:13px}
 dialog{border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);padding:0;width:min(760px,calc(100vw - 32px));max-height:calc(100vh - 48px)}
 .imgpop{position:fixed;z-index:9999;pointer-events:none;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:6px;box-shadow:0 18px 40px -12px rgba(0,0,0,.35);opacity:0;transform:scale(.96);transition:opacity .12s,transform .12s}.imgpop.on{opacity:1;transform:none}.imgpop img{display:block;width:320px;height:320px;object-fit:contain;border-radius:8px;background:#fff}.imgpop span{display:block;font-size:12px;font-weight:600;padding:6px 4px 2px;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+nav .rhead[draggable=true],nav .rgrp>button[draggable=true]{cursor:grab}
+nav .dragging{opacity:.45}
+nav .drop-before{box-shadow:inset 0 3px 0 var(--accent)}
+nav .drop-after{box-shadow:inset 0 -3px 0 var(--accent)}
+nav .rhead .rgrip{margin-left:auto;opacity:0;color:var(--muted);display:inline-flex;transition:opacity .15s}
+nav .rhead:hover .rgrip{opacity:.7}
+body.railmini nav .rgrip{display:none}
 dialog::backdrop{background:rgba(10,15,25,.45)}
 dialog#dlg[open]{display:flex;flex-direction:column;resize:both;overflow:hidden;min-width:min(420px,calc(100vw - 16px));min-height:240px;max-width:calc(100vw - 16px);max-height:calc(100vh - 16px)}
 dialog#dlg>.dlg{flex:1 1 auto;min-height:0;max-height:none}#dlgBody>h2:first-child{padding-right:40px}
@@ -5636,4 +5643,68 @@ db.doc("config/kpi").onSnapshot(s=>{S.kpi=s.exists?s.data():{};schedule()},()=>{
 })();
 </script>
 
+
+<script>
+/* Kéo – thả để sắp xếp danh mục ở thanh bên trái (nhóm chính và mục con). Lưu theo từng máy. */
+(function(){
+  const KEY="skl-rail-order", R=document.querySelector("nav.krail")||document.querySelector("nav.rail"); if(!R) return;
+  const load=()=>{try{return JSON.parse(localStorage.getItem(KEY)||"{}")||{}}catch(_){return {}}};
+  const save=o=>{try{localStorage.setItem(KEY,JSON.stringify(o))}catch(_){}};
+  const itemKey=b=>{const d=b.dataset;return d.gvv?"g:"+d.gvv:d.view?"v:"+d.view:d.sec?"s:"+d.sec:d.scr?"k:"+d.scr:d.kho?"k:"+d.kho:""};
+  const heads=()=>[...R.querySelectorAll(":scope > .rhead[data-g]")];
+  const grpOf=g=>R.querySelector(`:scope > .rgrp[data-g="${g}"]`);
+  function apply(){
+    const o=load();
+    if(Array.isArray(o.g)&&o.g.length){
+      const hs=heads(); if(!hs.length) return;
+      const last=grpOf(hs.at(-1).dataset.g)||hs.at(-1), mk=document.createComment("rail-end"); last.after(mk);
+      const want=[...o.g.filter(g=>hs.some(h=>h.dataset.g===g)),...hs.map(h=>h.dataset.g).filter(g=>!o.g.includes(g))];
+      want.forEach(g=>{const h=R.querySelector(`:scope > .rhead[data-g="${g}"]`),c=grpOf(g); if(h) R.insertBefore(h,mk); if(c) R.insertBefore(c,mk);});
+      mk.remove();
+    }
+    if(o.i) Object.entries(o.i).forEach(([g,arr])=>{const c=grpOf(g); if(!c||!Array.isArray(arr)) return; const bs=[...c.children].filter(b=>b.tagName==="BUTTON"&&itemKey(b)); arr.forEach(k=>{const b=bs.find(x=>itemKey(x)===k); if(b) c.appendChild(b);}); [...c.children].filter(x=>!(x.tagName==="BUTTON"&&itemKey(x))).forEach(x=>c.appendChild(x));});
+  }
+  function record(){
+    const o={g:heads().map(h=>h.dataset.g),i:{}};
+    R.querySelectorAll(":scope > .rgrp[data-g]").forEach(c=>{o.i[c.dataset.g]=[...c.children].filter(b=>b.tagName==="BUTTON"&&itemKey(b)).map(itemKey)});
+    save(o);
+  }
+  function arm(){
+    if(!matchMedia("(hover:hover) and (pointer:fine)").matches) return;
+    heads().forEach(h=>{ if(h.draggable) return; h.draggable=true; h.title="Kéo để sắp xếp nhóm"; if(!h.querySelector(".rgrip")){const s=document.createElement("span");s.className="rgrip";s.setAttribute("aria-hidden","true");s.innerHTML='<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';h.appendChild(s);} });
+    R.querySelectorAll(":scope > .rgrp > button").forEach(b=>{ if(itemKey(b)&&!b.draggable){ b.draggable=true; } });
+  }
+  let drag=null, overEl=null;
+  const clear=()=>{R.querySelectorAll(".drop-before,.drop-after").forEach(x=>x.classList.remove("drop-before","drop-after"));};
+  R.addEventListener("dragstart",e=>{
+    const h=e.target.closest&&e.target.closest(".rhead[data-g]"), b=!h&&e.target.closest&&e.target.closest(".rgrp > button");
+    if(h&&h.parentNode===R){ drag={type:"g",el:h,g:h.dataset.g}; }
+    else if(b&&itemKey(b)){ drag={type:"i",el:b,grp:b.parentNode}; }
+    else return;
+    drag.el.classList.add("dragging"); e.dataTransfer.effectAllowed="move"; try{e.dataTransfer.setData("text/plain",drag.type)}catch(_){}
+  });
+  R.addEventListener("dragover",e=>{
+    if(!drag) return;
+    let t=null;
+    if(drag.type==="g"){ const x=e.target.closest(".rhead[data-g], .rgrp[data-g]"); if(x&&x.parentNode===R) t=x.classList.contains("rgrp")?R.querySelector(`:scope > .rhead[data-g="${x.dataset.g}"]`):x; }
+    else { const x=e.target.closest(".rgrp > button"); if(x&&x.parentNode===drag.grp&&itemKey(x)) t=x; }
+    if(!t||t===drag.el){ clear(); overEl=null; return; }
+    e.preventDefault(); e.dataTransfer.dropEffect="move";
+    const r=t.getBoundingClientRect(), after=e.clientY>r.top+r.height/2;
+    clear(); t.classList.add(after?"drop-after":"drop-before"); overEl={t,after};
+  });
+  R.addEventListener("drop",e=>{
+    if(!drag||!overEl) return; e.preventDefault();
+    const {t,after}=overEl;
+    if(drag.type==="g"){ const g=drag.g, c=grpOf(g), tc=grpOf(t.dataset.g);
+      if(after){ const ref=(tc||t); ref.after(drag.el); if(c) drag.el.after(c); } else { t.before(drag.el); if(c) drag.el.after(c); } }
+    else { after?t.after(drag.el):t.before(drag.el); }
+    record();
+  });
+  R.addEventListener("dragend",()=>{ if(drag) drag.el.classList.remove("dragging"); drag=null; overEl=null; clear(); });
+  apply(); arm();
+  new MutationObserver(()=>arm()).observe(R,{childList:true,subtree:true});
+  window.railOrderReset=()=>{try{localStorage.removeItem(KEY)}catch(_){} location.reload();};
+})();
+</script>
 </body></html>
